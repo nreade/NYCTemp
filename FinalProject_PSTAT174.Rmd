@@ -1,0 +1,227 @@
+
+Monthly Temperature in NYC
+by Nicholas Reade
+
+INITIAL PLOTTED TS:
+
+```{r}
+library(dplyr)
+library(MASS)
+library(janitor)
+library(tidyverse)
+library(magrittr)
+library(TSstudio)
+library(data.table)
+library(tsdl)
+library(plyr)
+
+# call and name the TSDL Data Set for Monthly Temerature in New York Time series data
+temp_ts <- subset(tsdl,12,"Meteorology")[[16]]
+
+t_length = length(temp_ts)
+# 168 = length
+mean_ts = mean(temp_ts)
+# 15.33289 = mean
+
+# plot the ts data
+plot.ts(temp_ts, main = "Monthly Temperature in NYC", ylab = "Temperature Celsius")
+abline(h = mean(temp_ts),lty = 2, col = "blue")
+```
+
+DECOMPOSITION:
+
+```{r}
+# decompose the data to show relative trend and seasonailty of ts
+decomp <- decompose(temp_ts)
+plot(decomp)
+```
+
+TRANSFORMATIONS:
+
+```{r}
+t <- 1:t_length
+bcTransform <- boxcox(temp_ts ~ t,plotit = TRUE)
+
+# determine the lambda value
+lambda <- bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+lambda
+# 0.989899
+```
+
+DATA DIFFERENCING 
+
+```{r}
+# difference at lag 12
+s_diff_temp <- diff(temp_ts, 12)
+ts.plot(s_diff_temp, main = "De-seasoned Time Series", ylab = expression(nabla~Y[t]))
+abline(h = 0,lty = 2, col = "blue")
+
+# check variances of the data
+var(temp_ts) 
+# 7.997914
+var(s_diff_temp) 
+# 0.8221744
+```
+
+ACF/PACF ANALYSIS:
+
+```{r}
+# acf and pacf for lag 12 diff
+op= par(mfrow=c(1,2))
+par(mar=c(3,3,3,3))
+acf(s_diff_temp, lag.max = 60, main = "ACF")
+pacf(s_diff_temp, lag.max = 60, main = "PACF")
+```
+
+CHOOSING MODEL (Lowest AICc):
+
+```{r}
+library(qpcR)
+library(forecast)
+
+temp_arima1 <- arima(temp_ts, order=c(1,0,0), seasonal = list(order = c(2,1,0), period = 12), method="ML")
+# AICc
+# 357.4786
+
+# test other numbers
+temp_arima2 <- arima(temp_ts, order=c(1,0,1), seasonal = list(order = c(1,1,2), period = 12), method="ML")
+# AICc
+# 360.4953
+
+temp_arima3 <- arima(temp_ts, order=c(1,0,1), seasonal = list(order = c(2,1,1), period = 12), method="ML")
+# AICc
+#359.2562
+
+# use the temp_arima1 model because it has the lowest AICc
+# figure out the look fo the mathematical model
+AICc(temp_arima1)
+# AICc
+# 357.4786
+AICc(temp_arima2)
+# AICc
+# 360.4953
+AICc(temp_arima3)
+# AICc
+#359.2562
+temp_arima1
+temp_arima2
+temp_arima3
+```
+
+```{r}
+# create residuals for Model 1
+temp_res <- residuals(temp_arima1)
+# create residuals for model 3
+temp_res3 <- residuals(temp_arima3)
+```
+
+GRAPHICAL DIAGNOSTIC TESTS:
+
+```{r}
+# check graph diagnostics
+op= par(mfrow=c(2,2))
+hist(temp_res,density=20,breaks=20, col="blue", xlab="", prob=TRUE, main = "Histogram for Model 1")
+plot.ts(temp_res, main = "Plot for Model 1")
+abline(h = 0,lty = 2, col = "blue")
+qqnorm(temp_res,main= "Normal Q-Q Plot for Model 1")
+qqline(temp_res,col="blue")
+```
+
+```{r}
+# test for arima 3 res
+op= par(mfrow=c(2,2))
+hist(temp_res3,density=20,breaks=20, col="blue", xlab="", prob=TRUE, main = "Histogram for Model 3")
+plot.ts(temp_res3, main = "Plot for Model 3")
+abline(h = 0,lty = 2, col = "blue")
+qqnorm(temp_res3,main= "Normal Q-Q Plot for Model 3")
+qqline(temp_res3,col="blue")
+```
+
+RESIDUAL ACF/PACF CHECK:
+
+```{r}
+# check the residuals for model 1
+op= par(mfrow=c(1,2))
+par(mar=c(3,3,3,3))
+acf(temp_res, lag.max=60, main = "Residual ACF Model 1")
+pacf(temp_res, lag.max=60, main = "Residual PACF Model 1")
+```
+
+```{r}
+# test for model 3
+op= par(mfrow=c(1,2))
+par(mar=c(3,3,3,3))
+acf(temp_res3, lag.max=60, main = "Residual ACF Model 3")
+pacf(temp_res3, lag.max=60, main = "Residual PACF Model 3")
+```
+
+DIAGNOSTIC CHECKING:
+
+```{r}
+# check for model 1
+shapiro.test(temp_res)
+#p-value = 3.746e-11
+
+Box.test(temp_res, lag = 13, type = c("Box-Pierce"), fitdf = 1)
+#p-value = 0.083
+
+Box.test(temp_res, lag = 13, type = c("Ljung-Box"), fitdf = 1)
+#p-value = 0.05444
+
+# Mcleod-Li test (Ljung - Box for squares)
+Box.test((temp_res)^2, lag = 13, type = c("Ljung-Box"), fitdf = 0)
+#p-value = 0.5409
+
+```
+
+```{r}
+# check for model 2
+shapiro.test(temp_res3)
+#p-value = 3.746e-11
+
+Box.test(temp_res3, lag = 13, type = c("Box-Pierce"), fitdf = 2)
+#p-value = 0.083
+
+Box.test(temp_res3, lag = 13, type = c("Ljung-Box"), fitdf = 2)
+#p-value = 0.05444
+
+# Mcleod-Li test (Ljung - Box for squares)
+Box.test((temp_res3)^2, lag = 13, type = c("Ljung-Box"), fitdf = 0)
+#p-value = 0.5409
+```
+
+FORECASTING:
+
+Algebraic Expression
+
+$0.05107993X_{t-37}-0.4631X_{t-36}+0.03294661X_{t-25}-0.2987X_{t-24}+0.02627346X_{t-13}-0.2382X_{t-12}-0.1103X_{t-1}+X_t = Z_t$
+
+```{r}
+
+temp_start <- tsdl[[636]][1:156] 
+end <- tsdl[[636]][157:168]
+
+fit_forecast <- arima(temp_start, order=c(1,0,0), seasonal = list(order = c(2,1,0), period = 12), method="ML");
+
+predicted_ts <- predict(fit_forecast, n.ahead = 12) 
+U_b <- predicted_ts$pred + 2*predicted_ts$se 
+L_b <- predicted_ts$pred - 2*predicted_ts$se 
+
+ts.plot(temp_start, xlim=c(1,length(temp_start)+12), ylim = c(min(temp_start),max(U_b)), main="Forecast of Monthly Temperature in NYC", ylab = "Temperature")
+lines(U_b, col="black", lty="dashed") 
+lines(L_b, col="black", lty="dashed") 
+points(157:168, predicted_ts$pred, col="red") 
+points(157:168, end, col="blue") 
+legend("topleft", pch = 1,col=c("red","blue"), legend=c("Forecasted value", "True Value"), inset = 0.02)
+legend("bottomleft", c("Original Values", "U/L Bounds"), lty=1:2, cex=1, col = c("black"), inset = 0.02)
+```
+
+END
+
+THANK YOU FOR A GREAT CLASS!
+
+
+
+
+
+
